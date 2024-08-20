@@ -1,0 +1,248 @@
+-------------------------------
+title: "qPCR plots"
+author: "Pop Tania"
+-------------------------------
+
+```{r}
+install.packages("reshape2")
+```
+
+```{r}
+library(ggplot2)
+library(reshape2)
+```
+
+
+
+1. qPCR analysis of genes involved in lysine catabolism pathway.
+
+```{r}
+
+# Creating the data frame (the Average and STd were calculated before in EXCEL)
+
+data <- data.frame( 
+  Plot = c('DAY 1', 'DAY 3', 'DAY 5', 'DAY 7', 'DAY 9', 'DAY 10'),
+  aass_avg = c(1.038188131, 1.095306602, 1.34730057, 3.826710437, 1.049059077, 2.191870995),
+  aldh7a1_avg = c(1.033566773, 1.108653876, 1.564258401, 2.079191855, 0.767305506, 1.33377181),
+  gcdha_avg = c(1.029192732, 6.58401698, 10.55688424, 14.19522637, 7.586005373, 8.031446074),
+  gcdhb_avg = c(1.022333591, 4.57472093, 4.575411368, 7.523136456, 4.041332652, 4.689132958),
+  aass_std = c(0.362322959, 0.304427429, 0.016422743, 0.942656854, 0.021851103, 0.446366049),
+  aldh7a1_std = c(0.326709916, 0.279200022, 0.127426104, 0.519399576, 0.01082591, 0.090009692),
+  gcdha_std = c(0.283287836, 2.293400131, 1.88697345, 1.848656702, 1.487928001, 0.552562756),
+  gcdhb_std = c(0.259732174, 1.766849452, 1.09375302, 0.943839229, 0.299188008, 0.343196586)
+)
+
+# Set the order for plotting
+data$Plot <- factor(data$Plot, levels = c('DAY 1', 'DAY 3', 'DAY 5', 'DAY 7', 'DAY 9', 'DAY 10'))
+
+# Melt data for Average values
+avg_data <- melt(data, id.vars = 'Plot', measure.vars = grep('_avg', names(data), value = TRUE))
+avg_data$variable <- gsub('_avg', '', avg_data$variable)
+
+# Melt data for STD values
+std_data <- melt(data, id.vars = 'Plot', measure.vars = c('aass_std', 'aldh7a1_std', 'gcdha_std', 'gcdhb_std'))
+std_data$variable <- gsub('_std', '', std_data$variable)
+
+# Combine average and std data
+combined_data <- merge(avg_data, std_data, by = c('Plot', 'variable'))
+colnames(combined_data) <- c('Plot', 'variable', 'average', 'std')
+
+# Plot Average values and STd 
+
+avg_plot <- ggplot(combined_data, aes(x = Plot, y = average, fill = variable)) +
+  geom_bar(stat = 'identity', position = position_dodge(width = 0.9), width = 0.85) +
+  geom_errorbar(aes(ymin = average - std, ymax = average + std), position = position_dodge(width = 0.9), width = 0.25) +
+  labs(x = 'Days post fertilization', y = 'Relative mRNA expression to Day 1', title = 'Quantitative PCR analysis of disease-related genes in the lysine catabolism pathway \nin wild-type larvae from 1 to 10 dpf') +
+  theme_minimal() +
+  scale_x_discrete(drop = FALSE) +
+  scale_fill_manual(values = c('aass' = '#9DD9F3', 'aldh7a1' = '#aaf0c9', 'gcdha' = 'grey', 'gcdhb' ='#7e909a')) +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    legend.position = 'bottom',
+    legend.title = element_blank(),
+    legend.text = element_text(size = 15, face = "italic"), # Increase and italicize legend text size
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 15, lineheight = 1.5),
+    axis.title.x = element_text(margin = margin(t = 15), size = 15),
+    axis.title.y = element_text(margin = margin(r = 15), size = 15),
+    axis.text.x = element_text(size = 15) # Increase days text size
+  ) +
+  guides(fill = guide_legend(title = NULL, nrow = 1, byrow = TRUE))
+
+# Print plot
+print(avg_plot)
+ ggsave(paste(".//Figuresqpcr//", "gene_lysine.jpg"), width = 10, height = 7)
+
+
+```
+
+
+
+
+
+
+
+2. qPCR analysis of the sccpdh gene, which encode for the SCCPDH putative enzyme.
+
+
+```{r}
+
+# create data frame
+#calculations were done in EXCEL
+
+data <- data.frame( 
+  Plot = c('DAY 1', 'DAY 3', 'DAY 5', 'DAY 7', 'DAY 9', 'DAY 10'),
+  sccpdha1_avg = c(1.001319301, 6.586294866, 30.10463395, 16.68341594, 13.39732518, 14.10795299),
+  sccpdha2_avg = c(1.001539409, 6.486601503, 30.13402554, 12.59668835, 9.827462175, 11.08919959),
+  sccpdhb_avg = c(1.006579422, 4.343517648, 4.070924143, 3.426488971, 2.642137666, 3.087847888),
+  sccpdha1_std = c(0.063642211, 1.049811992, 2.421456939, 0.447206371, 3.456829561, 1.304055093),
+  sccpdha2_std = c(0.067360113, 0.403308708, 2.068107077, 2.109915662, 2.247474659, 1.375842432),
+  sccpdhb_std = c(0.143938498, 0.949953118, 0.178698926, 0.406747415, 0.468913276, 0.292009772))
+
+# Set the order of the 'Plot' factor
+data$Plot <- factor(data$Plot, levels = c('DAY 1', 'DAY 3', 'DAY 5', 'DAY 7', 'DAY 9', 'DAY 10'))
+
+# Melt data for Average values
+avg_data <- melt(data, id.vars = 'Plot', measure.vars = grep('_avg', names(data), value = TRUE))
+avg_data$variable <- gsub('_avg', '', avg_data$variable)
+
+# Melt data for STD values
+std_data <- melt(data, id.vars = 'Plot', measure.vars = c('sccpdha1_std', 'sccpdha2_std', 'sccpdhb_std'))
+std_data$variable <- gsub('_std', '', std_data$variable)
+
+# Combine average and std data
+combined_data <- merge(avg_data, std_data, by = c('Plot', 'variable'))
+colnames(combined_data) <- c('Plot', 'variable', 'average', 'std')
+
+# Plot Average values
+avg_plot <- ggplot(combined_data, aes(x = Plot, y = average, fill = variable)) +
+  geom_bar(stat = 'identity', position = position_dodge(width = 0.9), width = 0.85) +
+  geom_errorbar(aes(ymin = average - std, ymax = average + std), position = position_dodge(width = 0.9), width = 0.25) +
+  labs( x = "Days post fertilization", 
+        y = "Relative mRNA expression to Day 1", 
+        title =  expression(atop(bold("Quantitative PCR analysis of " * italic("sccpdha1, sccpdha2, sccpdhb") * " genes"), 
+                                 bold(" in wild-type larvae from 1 to 10 dpf"))))+
+  theme_minimal()+
+  scale_x_discrete(drop = FALSE) +
+  scale_fill_manual(values = c('sccpdha1' = '#9DD9F3', 'sccpdha2' = '#aaf0c9', 'sccpdhb' = 'grey')) +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    legend.position = 'bottom',
+    legend.title = element_blank(),
+    legend.text = element_text(size = 15, face = "italic"), # Increase legend text size
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 15, lineheight = 1.5),
+    axis.title.x = element_text(margin = margin(t = 15), size = 14),
+    axis.title.y = element_text(margin = margin(r = 15), size = 14),
+    axis.text.x = element_text(size = 15) # Increase days text size
+  ) +
+  guides(fill = guide_legend(title = NULL, nrow = 1, byrow = TRUE))
+
+# Print plots
+print(avg_plot)
+ggsave(paste(".//Figuresqpcr//", "sccpdh_lysine.jpg"), width = 10, height = 7)
+
+
+
+```
+
+
+3. qPCR analysis to see the expression of sccpdh genes in aass HOMO and WT at 7dpf.
+
+```{r}
+
+#create the data frame - EXCEL calculation
+
+wt_sccpdha1 <- c(1.029, 1.078, 0.902)
+homo_sccpdha1 <- c(1.755, 1.448, 1.596)
+
+wt_sccpdha2 <- c(1.020, 1.046, 0.937)
+homo_sccpdha2 <- c(1.680, 1.349, 1.403)
+
+wt_sscpdhb <- c(0.867, 1.008, 1.144)
+homo_sscpdhb <- c(1.166, 1.017, 1.589)
+
+# Perform the t-tests: Two Sample t-test (independent or unpaired)
+test_sccpdha1 <- t.test(wt_sccpdha1, homo_sccpdha1)
+test_sccpdha2 <- t.test(wt_sccpdha2, homo_sccpdha2)
+test_sscpdhb <- t.test(wt_sscpdhb, homo_sscpdhb)
+
+# Output the t-test and p-value for each test 
+test_sccpdha1
+test_sccpdha2
+test_sscpdhb
+
+library(ggplot2)
+library(tidyr)
+
+average_values <- data.frame(
+  Gene = c('sccpdha1', 'sccpdha2', 'sscpdhb'),
+  WT_Average = c(1.003, 1.001, 1.006),
+  HOMO_Average = c(1.600, 1.478, 1.257),
+  WT_SD = c(0.091, 0.057, 0.139),
+  HOMO_SD = c(0.153, 0.178, 0.297)
+)
+
+p_values <- data.frame(
+  Gene = c('sccpdha1', 'sccpdha2', 'sscpdhb'),
+  P_Value = c(0.008, 0.033, 0.28)
+)
+
+p_values$NegLogP <- -log10(p_values$P_Value)
+combined_data <- merge(average_values, p_values, by = "Gene")
+
+combined_data$Stars <- ifelse(combined_data$P_Value < 0.001, "***",
+                              ifelse(combined_data$P_Value < 0.01, "**",
+                                     ifelse(combined_data$P_Value < 0.05, "*", "")))
+
+combined_data_long <- pivot_longer(
+  combined_data,
+  cols = c(WT_Average, HOMO_Average, WT_SD, HOMO_SD),
+  names_to = c("Condition", ".value"),
+  names_pattern = "(.*)_(.*)"
+)
+
+combined_data_long$Condition <- factor(combined_data_long$Condition, levels = c("WT", "HOMO"))
+dodge_width <- 0.9
+dodge <- position_dodge(width = dodge_width)
+
+plot <- ggplot(combined_data_long, aes(x = Gene, y = Average, fill = Condition)) + 
+  geom_bar(stat = "identity", position = dodge, width = 0.85) +
+  geom_errorbar(aes(ymin = Average - SD, ymax = Average + SD), 
+                position = dodge, width = 0.25) +
+  geom_text(data = combined_data_long, aes(x = Gene, y = Average + SD + 0.02, label = ifelse(Condition == "HOMO", Stars, "")),
+            position = dodge, vjust = 0, hjust = 0.5, size = 6, color ="black") + # Increase star size
+  scale_fill_manual(values = c("WT" = "skyblue", "HOMO" = "grey")) +
+  labs(x = "Gene", y = "Relative mRNA expression to WT", 
+       title =  expression(atop(bold("Quantitative PCR analysis of " * italic("sccpdha1, sccpdha2, sccpdhb") * " genes"), 
+                                bold("in " * italic("aass") * " WT and " * italic("aass") * " HOMO at 7dpf")))) +
+  theme_minimal() +
+  theme(legend.title = element_blank(), 
+        legend.position = "bottom", 
+        legend.text = element_text(size = 15), 
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        plot.title = element_text(hjust = 0.5, face = "bold", size = 20),
+        axis.title.y = element_text(margin = margin(r = 15), size = 18), # Increase y-axis title size
+        axis.title.x = element_text(margin = margin(t = 15), size = 18),
+        axis.text.x = element_text(size = 15), # Increase gene name size
+        axis.text.y = element_text(size = 15)) + # Increase y-axis text size
+  guides(fill = guide_legend(title = NULL, nrow = 1, byrow = TRUE)) +
+  scale_x_discrete(labels = c(expression(italic("sccpdha1")), 
+                              expression(italic("sccpdha2")), 
+                              expression(italic("sscpdhb"))))
+
+plot + scale_y_continuous(
+  breaks = seq(0, 2, by = 0.2), 
+  limits = c(0, 2)
+) +
+  theme(
+    axis.title.y = element_text(margin = margin(r = 15)), 
+    axis.title.x = element_text(margin = margin(t = 10))
+  )
+ggsave(paste(".//Figuresqpcr//", "sccpdh_mutant.jpg"), width = 10, height = 7)
+
+```
+
+
