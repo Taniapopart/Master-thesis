@@ -1,0 +1,1361 @@
+-----------------------------
+title: "Metabolomics analysis"
+author: "Pop Tania"
+-----------------------------
+
+
+
+```{r}
+install.packages("rstatix")
+install.packages("tidyverse")
+install.packages("rstatix")
+install.packages("ggpubr")
+install.packages("ggplot2")
+install.packages("dplyr")
+
+install.packages("pcaMethods") #Not suitable for the latest version
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+BiocManager::install("pcaMethods")
+```
+
+```{r}
+library(tidyverse)
+library(ggpubr)
+library(rstatix)
+library(ggplot2)
+library(pcaMethods)
+library(dplyr)
+```
+
+
+1. Read the metabolomics data (raw data is targeted metabolomics with peak intensities)
+
+The reference column it will be used to know how to divide the metabolites with the corresponding internal standard (IS) for the first data normalization step.
+
+```{r}
+
+metabolomics_data <- read.csv(".\\data\\Metadata.csv", header = TRUE)
+print(metabolomics_data)
+
+```
+
+
+Separate "metadata" and initialize the result data frame
+
+```{r}
+
+metadata <- metabolomics_data[,1:34]
+result <- metabolomics_data[,1:34]
+
+
+print(metadata$Reference[1])
+print(metadata$Compound.Name[2])
+#check point
+
+```
+
+2. Data normalization with internal standard (IS)
+
+Loop through each sample (column)
+
+
+```{r}
+
+for (j in 3:ncol(metadata)) {
+  # Loop through each metabolite (row), excluding the last row (standard)
+  for (i in 1:(nrow(metadata) - 3)) {
+    # Get the standard based on the reference
+    standart <- metadata$Reference[i]
+    
+    if (standart == "IS-AAA-d3-Fmoc") {
+      standartindex <- 27
+    } else if (standart == "IS-PIP-d9_Fmoc") {
+      standartindex <- 28
+    } else if (standart == "IS-TFL_Fmoc") {
+      standartindex <- 29
+    } else {
+      next  
+    }
+    
+    metabolit_value <- metadata[i,j]
+    metabolit_standart <- metadata[standartindex,j]
+    
+    # Handle NA values
+    if (is.na(metabolit_value)) {
+      metabolit_value <- 0
+    }
+    if (is.na(metabolit_standart)) {
+      metabolit_standart <- 1 
+    }
+    
+    metabolit_norm <- metabolit_value / metabolit_standart
+    
+    print("Dividing")
+    print(metabolit_value)
+    print(metabolit_standart)
+    print(metabolit_norm)
+    
+    # Assign the rounded result to the result data frame
+    result[i,j] <- round(metabolit_norm, 10)
+  }
+}
+
+# Replace any remaining NA values in the result data frame with 0
+#result[is.na(result)] <- 0
+
+
+# View the resulting data frame
+print("Resulting Data Frame")
+print(result)
+
+
+#exclude the last 3 rows which were IS and remove the Reference column
+norma_before <- result [1:26,]
+norma_before <- subset(norma_before, select=-c(Reference)) #data before log transformation
+
+#write.csv(norma_p, "C:/Users/Boogitha/Desktop/csv/metabolomics.csv") 
+
+```
+
+3. Data visualization before Log transformation (normality distribution)
+
+
+```{r}
+
+
+#Density plot
+#Remove the first column (Compound.Name) for visualization
+
+norma_before_data <- norma_before[, -1]
+
+#Combine all values into a single vector
+combined_before_data <- unlist(norma_before_data)
+
+#Create the density plot
+p <- ggplot(data.frame(Value = combined_before_data), aes(x = Value)) +
+  geom_density(fill = "lightgreen", alpha = 0.5) +
+  labs(title = "Density Plot of overall data before Log transformation", x = "Value", y = "Density")+ 
+    theme_minimal() +  # Use a minimal theme to remove background
+  theme(
+    panel.grid = element_blank(),       # Remove grid lines
+    axis.line = element_line(color = "black"),  # Keep axis lines in black
+    axis.ticks = element_line(color = "black"), # Keep axis ticks in black
+    plot.title = element_text(face = "bold"))      # Optional: center the title
+  ggsave("density_plot_before_log_transformation.jpg", plot = p, width = 8, height = 6, dpi = 300)
+
+```
+
+
+
+4. Imputation of the missing data (zero)
+
+#I did this because due to the values = 0, the log transformation will convert it in -inf
+#To encounter this, I search for the small value in the respective row and then add where were missing values, the min value divided by 5.
+
+```{r}
+
+before_imputation <-norma_before[, -1]
+
+for (i in 1:nrow(before_imputation)) {
+  
+  ind <- before_imputation [i,] %in% 0
+  if (any(ind)) {
+    
+  before_imputation [i, ind] <- min(before_imputation[i, !ind])/5
+}
+}
+
+
+#Add the metabolite column back and change the first column name with "Compound.Name"
+
+after_imputation <- data.frame(norma_before[,1], before_imputation)
+colnames(after_imputation)[1] <-"Compound.Name"
+
+  
+```
+
+
+
+
+5. Log Transformation of the normalized data with IS
+
+Log transformation of the data; in this way the data is normally distributed.
+Log transformation is a common technique used to normalize data, reduce skewness, and handle heteroscedasticity in statistical analysis
+
+```{r}
+
+result_log <- after_imputation
+print(result_log)
+for (j in 2:ncol(result_log)) {
+  print( result_log[, j])
+  result_log[, j] <- (log10(result_log[, j])) 
+  print(result_log[, j])
+
+} 
+
+#Data visualization after Log transformation
+#Normality distribution using Density plot
+#Remove the first column (Compound.Name) for visualization
+norma_after_data <- result_log[, -1]
+
+# Combine all values into a single vector
+combined_after_data <- unlist(norma_after_data)
+
+# Create the density plot
+d <- ggplot(data.frame(Value = combined_after_data), aes(x = Value)) +
+  geom_density(fill = "lightgreen", alpha = 0.5) +
+  stat_function(fun = dnorm, 
+                args = list(mean = mean(combined_after_data), sd = sd(combined_after_data)),
+                color = "red", linetype = "dashed", size = 1) +  # Add a dashed red line for the normal distribution
+  labs(title = "Density Plot of overall data after Log transformation", x = "Value", y = "Density")+
+   theme_minimal() +  # Use a minimal theme to remove background
+  theme(
+    panel.grid = element_blank(),       # Remove grid lines
+    axis.line = element_line(color = "black"),  # Keep axis lines in black
+    axis.ticks = element_line(color = "black"), # Keep axis ticks in black
+    plot.title = element_text(face = "bold"))      # Optional: center the title
+  ggsave("density_plot_after_log_transformation.jpg", plot = d, width = 8, height = 6, dpi = 300)
+
+
+#write.csv(result_log, "C:/Users/Boogitha/Desktop/csv/Log10.csv") 
+```
+
+
+6. Scaling using Pareto scaling - used in metabolomics
+
+Pareto scaling is similar to standardization but instead of scaling the data to have a standard deviation of 1, it scales each variable by the square root of its standard deviation. 
+It is useful when you want to maintain some relative differences between variables.
+Pareto scaling can make data more interpretable, especially when dealing with data where the variance is meaningful and should not be entirely removed (Metabolomics data).
+Then all the data will have the same scale (around 0)
+It is a compromise between standardization and no scaling, aimed at reducing the impact of large values while preserving the data structure.
+Pareto scaling is primarily used to emphasize moderate differences in data by scaling the variables by the square root of their standard deviation. 
+
+
+```{r}
+
+# Apply Pareto Scaling
+pareto_scaled_data <- prep(t(result_log[,-1]), scale = "pareto")
+pareto_scaled_data <- t(pareto_scaled_data) 
+
+# Create a new data frame with the scaled data and original column names
+scaled_data <- data.frame(Compound.Name = norma_before[,1], 
+                          pareto_scaled_data)
+
+# Convert data to long format for ggplot
+long_df <- pivot_longer(scaled_data, cols = -Compound.Name, 
+                        names_to = "variable", values_to = "value")
+
+# Calculate mean and standard deviation of the scaled data
+mean_scaled <- mean(long_df$value)
+sd_scaled <- sd(long_df$value)
+
+# Create the density plot with an interrupted line showing the normal distribution
+b <- ggplot(long_df, aes(x = value)) +
+  geom_density(fill = "lightgreen", alpha = 0.5) +
+  labs(title = "Density Plot of overall data after Pareto scaling", 
+       x = "Value", y = "Density") +
+  theme_minimal() +  # Use a minimal theme to remove background
+  theme(
+    panel.grid = element_blank(),       # Remove grid lines
+    axis.line = element_line(color = "black"),  # Keep axis lines in black
+    axis.ticks = element_line(color = "black"), # Keep axis ticks in black
+    plot.title = element_text(face = "bold"))   # Bold the title
+
+# Save the plot as an image file
+ggsave("density_plot_after_scaling_transformation.jpg", plot = b, width = 8, height = 6, dpi = 300)
+
+```
+
+
+
+
+7. The t-test with Welch correction 
+
+
+This test is used when comparing the means of two groups that may have unequal variances
+Welch's t-test measures the probability that the observed difference between two groups is due to chance, assuming the null hypothesis is true. The null hypothesis typically states that there is no difference between the means of the two groups.
+
+The Welch test is designed to handle situations where the variances of the two groups are not equal, compared with Student t-test assumes equal variances (homogeneity of variances).
+Overall, the Welch test is considered more robust and reliable when the assumptions of equal variances and equal sample sizes are not met.
+This is the test where you do not assume that the variance is the same in the two groups, which results in the fractional degrees of freedom. 
+
+
+We suspect that the scores in each class might vary, so we can't assume that both classes have the same variance in their scores, like in Student t.test (var.equal = TRUE).
+
+```{r}
+
+
+data <- scaled_data
+# Transform data to long format
+long_data <- data %>%
+  pivot_longer(cols = starts_with("PP11"), names_to = "condition", values_to = "value")
+
+# Extract group and sample type information
+long_data <- long_data %>%
+  mutate(group = case_when(
+    str_detect(condition, "aass_HOMO_body") ~ "aass_HOMO_body",
+    str_detect(condition, "aass_WT_body") ~ "aass_WT_body",
+    str_detect(condition, "aass_HOMO_head") ~ "aass_HOMO_head",
+    str_detect(condition, "aass_WT_head") ~ "aass_WT_head",
+    str_detect(condition, "aldh7a1_HOMO_body") ~ "aldh7a1_HOMO_body",
+    str_detect(condition, "aldh7a1_WT_body") ~ "aldh7a1_WT_body",
+    str_detect(condition, "aldh7a1_HOMO_head") ~ "aldh7a1_HOMO_head",
+    str_detect(condition, "aldh7a1_WT_head") ~ "aldh7a1_WT_head"
+  ))
+
+print(long_data)
+colnames(long_data)[1] <-"Compound.Name"
+
+
+```
+
+###Data visualization and  Statistics (t.test with Welch correction)
+   
+   
+a) First comparison
+aass gene WT vs HOMO body 
+
+```{r}
+
+
+# Filter rows where the group column is either 'aass_HOMO_body' or 'aass_WT_body'
+filtered_data_body <- long_data %>% 
+  filter(group %in% c('aass_HOMO_body', 'aass_WT_body'))
+
+#write.csv(filtered_data, "C:/Users/Boogitha/Desktop/csv/Filtered_data.csv") 
+
+
+# Print the filtered data
+print(filtered_data_body)
+
+allmet <- unique(filtered_data_body$Compound.Name)
+allgroups <- unique(filtered_data_body$group)
+
+for (i in allmet) {
+  aass_body <- filtered_data_body %>% 
+    filter(Compound.Name %in% i)
+
+  # Reorder factor levels to have WT first
+  aass_body$group <- factor(aass_body$group, levels = c('aass_WT_body', 'aass_HOMO_body'))
+
+  # Check if the standard deviation is zero for both groups
+  sd_homo <- sd(aass_body$value[aass_body$group == 'aass_HOMO_body'])
+  sd_wt <- sd(aass_body$value[aass_body$group == 'aass_WT_body'])
+
+
+  t_result <- tryCatch(  #the use of "tryCatch" to not let the system crush -to stop the loop, because one of the two groups (from body and head) have no variance (all values are equal), this command allows the rest of the analysis to proceed.
+    t.test(value ~ group, data = aass_body, var.equal = FALSE),
+    error = function(e) {
+      message(paste("Skipping", i, "due to error in t-test:"))
+      return(NULL)
+    }
+  )
+
+  if (is.null(t_result)) next
+  
+  p_value <- t_result$p.value
+  p_value_text <- format.pval(p_value, scientific = TRUE, digits = 3)  # Format p-value to three decimal and scientific notation if needed
+  
+   # Combine numeric p-value with asterisks
+  significance_annotation_abody <- paste(
+    ifelse(p_value < 0.001, "***", 
+           ifelse(p_value < 0.01, "**", 
+                  ifelse(p_value < 0.05, "*", "ns"))), 
+    paste0("(", p_value_text, ")")
+  )
+  
+
+  bxp <- ggboxplot(
+    aass_body, x = "group", y = "value", 
+    ylab = "Value", xlab = "Group", add = "jitter",
+    fill = "group"  # Added fill to distinguish groups by color
+  ) +
+  scale_fill_manual(values = c("aass_HOMO_body" = "#90caf9", "aass_WT_body" = "#c8b1e4")) +
+  theme(legend.position = "none") + # Remove legend
+  ggtitle(paste(i, "- body")) +
+  xlab("") +
+  ylab("Normalized intensity")
+
+  bxp <- bxp + 
+    geom_signif(
+      comparisons = list(c("aass_HOMO_body", "aass_WT_body")),
+      map_signif_level = TRUE, textsize = 4,
+      annotations = significance_annotation_abody
+    )
+
+  print(bxp)
+  ggsave(paste(".//Figures1//", i, "aass body.png"), plot = bxp,  width = 7, height = 7)
+}
+
+
+```
+
+
+###To plot all the significant ones together (aass_body)
+
+
+```{r}
+# Filter rows where the group column is either 'aass_HOMO_body' or 'aass_WT_body'
+filtered_data <- long_data %>% 
+  filter(group %in% c('aass_HOMO_body', 'aass_WT_body'))
+
+# Print the filtered data
+print(filtered_data)
+
+allmet <- unique(filtered_data$Compound.Name)
+allgroups <- unique(filtered_data$group)
+
+# Initialize a dataframe to store significant metabolites and their p-values
+significant_data <- data.frame()
+
+for (i in allmet) {
+  aass_body <- filtered_data %>% 
+    filter(Compound.Name == i)
+
+  # Reorder factor levels to have WT first
+  aass_body$group <- factor(aass_body$group, levels = c('aass_WT_body', 'aass_HOMO_body'))
+
+  # Check if the standard deviation is zero for both groups
+  sd_homo <- sd(aass_body$value[aass_body$group == 'aass_HOMO_body'])
+  sd_wt <- sd(aass_body$value[aass_body$group == 'aass_WT_body'])
+
+
+  t_result <- tryCatch(
+    t.test(value ~ group, data = aass_body, var.equal = FALSE),
+    error = function(e) {
+      message(paste("Skipping", i, "due to error in t-test:"))
+      return(NULL)
+    }
+  )
+
+  if (is.null(t_result)) next
+  
+  p_value <- t_result$p.value
+  
+  if (p_value < 0.05) {  # Consider significant if p-value < 0.05
+    aass_body$p_value <- p_value
+    significant_data <- rbind(significant_data, aass_body)
+  }
+}
+
+# Check if there are any significant metabolites to plot
+if (nrow(significant_data) > 0) {
+  significant_data <- significant_data %>%
+    mutate(significance_annotation = ifelse(p_value < 0.001, "***", 
+                                             ifelse(p_value < 0.01, "**", 
+                                                    ifelse(p_value < 0.05, "*", "ns"))),
+           p_value_text = paste(significance_annotation, "(", format.pval(p_value, scientific = TRUE, digits = 3), ")", sep = ""))  # Add p-value text with asterisks
+
+  # Create a position dataframe for the annotations
+  annotation_positions <- significant_data %>%
+    group_by(Compound.Name) %>%
+    summarize(
+      max_value = max(value),
+      p_value_text = first(p_value_text)
+    )
+
+  # Custom labels for metabolites
+  custom_labels <- c(
+    "Ala_Fmoc" = "Alanine", "Asn_1Fmoc" = "Asparagine", "Asp_Fmoc" = "Aspartic acid", 
+    "Arg_1Fmoc" = "Arginine", "His_Fmoc" = "Histidine", "Gly_Fmoc" = "Glycine",
+    "Cys_Fmoc" = "Cysteine", "Glu_Fmoc" = "Glutamic acid", "Phe_Fmoc" = "Phenylalanine", 
+    "Pro_Fmoc" = "Proline", "Ser_Fmoc" = "Serine", "Thr_Fmoc" = "Threonine", 
+    "Trp_1Fmoc" = "Tryptophan", "Tyr_Fmoc" = "Tyrosine", "4-aminobutyrate_Fmoc" = "4-aminobutyrate*", 
+    "AAA-Fmoc" = "AAA", "PIP_Fmoc" = "PIP", "P6C_Fmoc 1" = "P6C*", "P6C_Fmoc 2" = "P6C*", 
+    "Saccharopine_Fmoc" = "Saccharopine", "Lys-2Fmoc" = "Lysine", "Gln_Fmoc" = "Glutamine"
+  )
+
+  # Modify the group names for plotting
+  significant_data$group_short <- gsub("aass_|_body", "", significant_data$group)
+
+  # Ensure factor levels for plotting
+  significant_data$group_short <- factor(significant_data$group_short, levels = c('WT', 'HOMO'))
+
+  bxp <- ggplot(significant_data, aes(x = group_short, y = value, fill = group)) +
+    geom_boxplot(outlier.color = NA) +
+    geom_jitter(width = 0.2) +
+    facet_wrap(~ Compound.Name, scales = "free_y", labeller = as_labeller(custom_labels)) +
+    scale_fill_manual(values = c("aass_HOMO_body" = "#90caf9", "aass_WT_body" = "#c8b1e4"),
+                      labels = c("aass_HOMO_body" = expression(italic("aass")~"HOMO Body"), 
+                                 "aass_WT_body" = expression(italic("aass")~"WT Body"))) +
+    theme(  text = element_text(size = 25),  #Increase general text size
+            strip.text = element_text(size = 25, margin = margin(b=15)),  #Increase facet label size
+            strip.background = element_blank(),  #Remove the gray background from facet labels
+            axis.text.y = element_text(size = 15),  #Y-axis text size
+            axis.text.x = element_text(size = 15), #X-axis text size
+            axis.title.y = element_text(size = 24), #Y-axis title size
+            plot.title = element_text(size =28, margin = margin(b=15)), #Space below the title 
+            legend.position = "bottom",  #Position legend at the bottom
+            legend.title = element_blank(), #Remove legend title
+            legend.text = element_text(size = 25),
+            panel.background = element_blank(), #Remove grey background
+            panel.grid.major = element_blank(), #Remove major grid lines
+            panel.grid.minor = element_blank(), #Remove minor grid lines
+            axis.line = element_line(color = "black"),
+            plot.margin = margin(t =20, r = 20, b = 20, l = 20),  # Adjust margins around the plot
+            panel.spacing = unit(1, "lines")) +  # Increase spacing between box plots
+    labs(title = "Significant metabolites and amino acids - body", x = "", y = "Normalized intensity") +
+    geom_text(data = annotation_positions, aes(x = 1.5, y = max_value * 1.1, label = p_value_text), inherit.aes = FALSE, vjust = -0.08, size = 6)  # Adjusted position for p-value text
+
+  print(bxp)
+  ggsave(".//Figures1//significant_metabolites_body.png", plot = bxp, width = 16, height = 12)
+} else {
+  message("No significant metabolites found.")
+}
+
+
+```
+
+
+
+b) Second comparison
+aass gene WT vs HOMO head 
+
+```{r}
+
+# Filter rows where the group column is either 'aass_HOMO_head' or 'aass_WT_head'
+filtered_data_head <- long_data %>% 
+  filter(group %in% c('aass_HOMO_head', 'aass_WT_head'))
+
+# Print the filtered data
+print(filtered_data_head)
+
+allmet <- unique(filtered_data_head$Compound.Name)
+allgroups <- unique(filtered_data_head$group)
+
+for (i in allmet) {
+  
+  aass_head <- filtered_data_head %>% 
+    filter(Compound.Name %in% i)
+  
+  # Reorder factor levels to have WT first
+  aass_head$group <- factor(aass_head$group, levels = c('aass_WT_head', 'aass_HOMO_head'))
+  
+  # Check if the standard deviation is zero for both groups
+  sd_homo <- sd(aass_head$value[aass_head$group == 'aass_HOMO_head'])
+  sd_wt <- sd(aass_head$value[aass_head$group == 'aass_WT_head'])
+  
+  t_result <- tryCatch(
+    t.test(value ~ group, data = aass_head, var.equal = FALSE),
+    error = function(e) {
+      message(paste("Skipping", i, "due to error in t-test:"))
+      return(NULL)
+    }
+  )
+  
+  if (is.null(t_result)) next
+  
+   p_value <- t_result$p.value
+  p_value_text <- format(p_value, scientific = TRUE, digits = 3)  # Format p-value in scientific notation
+  
+  # Combine numeric p-value with asterisks
+  significance_annotation_ahead <- paste(
+    ifelse(p_value < 0.001, "***", 
+           ifelse(p_value < 0.01, "**", 
+                  ifelse(p_value < 0.05, "*", "ns"))), 
+    paste0("(", p_value_text, ")")
+  )
+  
+  # Create boxplot
+  bxp <- ggboxplot(
+    aass_head, x = "group", y = "value", 
+    ylab = "Value", xlab = "Group", add = "jitter",
+    fill = "group"  # Added fill to distinguish groups by color
+  ) +
+    scale_fill_manual(values = c("aass_HOMO_head" = "#1565c0", "aass_WT_head" = "#5a189a")) +
+    theme(legend.position = "none") + # Remove legend
+    ggtitle(paste(i, "- head")) +
+    xlab("") +
+    ylab("Normalized intensity")
+  
+  bxp <- bxp + 
+    geom_signif(
+      comparisons = list(c("aass_HOMO_head", "aass_WT_head")),
+      map_signif_level = FALSE, textsize = 4,
+      annotations = significance_annotation_ahead
+    )
+  
+  print(bxp)
+  ggsave(paste(".//Figures2//", i, "aass head.png"), plot = bxp,  width = 7, height = 7)
+}
+
+
+```
+
+###To plot all the significant ones together (aass_head)
+
+```{r}
+
+# Filter rows where the group column is either 'aass_HOMO_head' or 'aass_WT_head'
+filtered_data <- long_data %>% 
+  filter(group %in% c('aass_HOMO_head', 'aass_WT_head'))
+
+# Print the filtered data
+print(filtered_data)
+
+allmet <- unique(filtered_data$Compound.Name)
+allgroups <- unique(filtered_data$group)
+
+# Initialize a dataframe to store significant metabolites and their p-values
+significant_data <- data.frame()
+
+for (i in allmet) {
+  aass_head <- filtered_data %>% 
+    filter(Compound.Name == i)
+
+  # Reorder factor levels to have WT first
+  aass_head$group <- factor(aass_head$group, levels = c('aass_WT_head', 'aass_HOMO_head'))
+
+  # Check if the standard deviation is zero for both groups
+  sd_homo <- sd(aass_head$value[aass_head$group == 'aass_HOMO_head'])
+  sd_wt <- sd(aass_head$value[aass_head$group == 'aass_WT_head'])
+
+
+  t_result <- tryCatch(
+    t.test(value ~ group, data = aass_head,, var.equal = FALSE),
+    error = function(e) {
+      message(paste("Skipping", i, "due to error in t-test"))
+      return(NULL)
+    }
+  )
+
+  if (is.null(t_result)) next
+  
+  p_value <- t_result$p.value
+  
+  if (p_value < 0.05) {  # Consider significant if p-value < 0.05
+    aass_head$p_value <- p_value
+    significant_data <- rbind(significant_data, aass_head)
+  }
+}
+
+# Check if there are any significant metabolites to plot
+if (nrow(significant_data) > 0) {
+  significant_data <- significant_data %>%
+    mutate(significance_annotation = ifelse(p_value < 0.001, "***", 
+                                             ifelse(p_value < 0.01, "**", 
+                                                    ifelse(p_value < 0.05, "*", "ns"))),
+           p_value_text = paste(significance_annotation, "(", format.pval(p_value, scientific = TRUE, digits = 3), ")", sep = ""))  # Add p-value text with asterisks
+
+  # Create a position dataframe for the annotations
+  annotation_positions <- significant_data %>%
+    group_by(Compound.Name) %>%
+    summarize(
+      max_value = max(value),
+      p_value_text = first(p_value_text)
+    )
+
+  # Custom labels for metabolites
+  custom_labels <- c(
+    "Ala_Fmoc" = "Alanine", "Asn_1Fmoc" = "Asparagine", "Asp_Fmoc" = "Aspartic acid", 
+    "Arg_1Fmoc" = "Arginine", "His_Fmoc" = "Histidine", "Gly_Fmoc" = "Glycine",
+    "Cys_Fmoc" = "Cysteine", "Glu_Fmoc" = "Glutamic acid", "Phe_Fmoc" = "Phenylalanine", 
+    "Pro_Fmoc" = "Proline", "Ser_Fmoc" = "Serine", "Thr_Fmoc" = "Threonine", 
+    "Trp_1Fmoc" = "Tryptophan", "Tyr_Fmoc" = "Tyrosine", "4-aminobutyrate_Fmoc" = "4-aminobutyrate*", 
+    "AAA-Fmoc" = "AAA", "PIP_Fmoc" = "PIP", "P6C_Fmoc 1" = "P6C*", "P6C_Fmoc 2" = "P6C*", 
+    "Saccharopine_Fmoc" = "Saccharopine", "Lys-2Fmoc" = "Lysine", "Gln_Fmoc" = "Glutamine"
+  )
+
+  # Modify the group names for plotting
+  significant_data$group_short <- gsub("aass_|_head", "", significant_data$group)
+
+  # Ensure factor levels for plotting
+  significant_data$group_short <- factor(significant_data$group_short, levels = c('WT', 'HOMO'))
+
+  bxp <- ggplot(significant_data, aes(x = group_short, y = value, fill = group)) +
+    geom_boxplot(outlier.color = NA) +
+    geom_jitter(width = 0.2) +
+    facet_wrap(~ Compound.Name, scales = "free_y", labeller = as_labeller(custom_labels)) +
+    scale_fill_manual(values = c("aass_HOMO_head" = "#1565c0", "aass_WT_head" = "#5a189a"),
+                      labels = c("aass_HOMO_head" = expression(italic("aass")~"HOMO Head"), 
+                                 "aass_WT_head" = expression(italic("aass")~"WT Head"))) +
+    theme(  text = element_text(size = 25),  #Increase general text size
+            strip.text = element_text(size = 25, margin = margin(b=15)),  #Increase facet label size
+            strip.background = element_blank(),  #Remove the gray background from facet labels
+            axis.text.y = element_text(size = 15),  #Y-axis text size
+            axis.text.x = element_text(size = 15), #X-axis text size
+            axis.title.y = element_text(size = 24), #Y-axis title size
+            plot.title = element_text(size =28, margin = margin(b=15)), #Space below the title 
+            legend.position = "bottom",  #Position legend at the bottom
+            legend.title = element_blank(), #Remove legend title
+            legend.text = element_text(size = 25),
+            panel.background = element_blank(), #Remove grey background
+            panel.grid.major = element_blank(), #Remove major grid lines
+            panel.grid.minor = element_blank(), #Remove minor grid lines
+            axis.line = element_line(color = "black"),
+            plot.margin = margin(t =20, r = 20, b = 20, l = 20),  # Adjust margins around the plot
+            panel.spacing = unit(1, "lines")) +  # Increase spacing between box plots
+    labs(title = "Significant metabolites and amino acids - head", x = "", y = "Normalized intensity") +
+    geom_text(data = annotation_positions, aes(x = 1.5, y = max_value * 1.1, label = p_value_text), inherit.aes = FALSE, vjust = -0.15, size = 6)  # Adjusted position for p-value text
+
+  print(bxp)
+  ggsave(".//Figures2//significant_metabolites_head.png", plot = bxp, width = 16, height = 12)
+} else {
+  message("No significant metabolites found.")
+}
+
+
+
+```
+
+
+######Combine body and head for each metabolite (aass gene)
+
+
+```{r}
+
+# Custom labels for metabolites
+custom_labels <- c(
+  "Ala_Fmoc" = "Alanine", "Asn_1Fmoc" = "Asparagine", "Asp_Fmoc" = "Aspartic acid", 
+  "Arg_1Fmoc" = "Arginine", "His_Fmoc" = "Histidine", "Gly_Fmoc" = "Glycine",
+  "Cys_Fmoc" = "Cysteine", "Glu_Fmoc" = "Glutamic acid", "Phe_Fmoc" = "Phenylalanine", 
+  "Pro_Fmoc" = "Proline", "Ser_Fmoc" = "Serine", "Thr_Fmoc" = "Threonine", 
+  "Trp_1Fmoc" = "Tryptophan", "Tyr_Fmoc" = "Tyrosine", "4-aminobutyrate_Fmoc" = "4-aminobutyrate*", 
+  "AAA-Fmoc" = "AAA", "PIP_Fmoc" = "PIP", "P6C_Fmoc 1" = "P6C*", "P6C_Fmoc 2" = "P6C*", 
+  "Saccharopine_Fmoc" = "Saccharopine", "Lys-2Fmoc" = "Lysine", "Gln_Fmoc" = "Glutamine",
+  "5-Aminopentanoate_Fmoc" = "5-aminopentanoate", "Ile_Fmoc" = "Isoleucine", "Leu_Fmoc" ="Leucine", "Val_Fmoc" = "Valine"
+)
+
+# Function to combine plots for each metabolite
+combine_plots <- function(metabolite, filtered_data_body, filtered_data_head, custom_labels) {
+  data_body <- filtered_data_body %>% filter(Compound.Name == metabolite)
+  data_head <- filtered_data_head %>% filter(Compound.Name == metabolite)
+
+  combined_data <- bind_rows(
+    data_body %>% mutate(region = "body"),
+    data_head %>% mutate(region = "head")
+  )
+
+  combined_data$group <- factor(combined_data$group, levels = c('aass_WT_body', 'aass_HOMO_body', 'aass_WT_head', 'aass_HOMO_head'))
+
+  # Perform t-tests for body and head separately
+  significance_annotations <- c("ns", "ns")
+  
+  if (nrow(data_body) > 0) {
+    t_result_body <- tryCatch(
+      t.test(value ~ group, data = data_body, var.equal = FALSE),
+      error = function(e) {
+        message(paste("Skipping body comparison for", metabolite, "due to error in t-test:", e$message))
+        return(NULL)
+      }
+    )
+    if (!is.null(t_result_body)) {
+      p_value_body <- t_result_body$p.value
+      p_value_text_body <- format.pval(p_value_body, scientific = TRUE, digits = 3)
+      significance_annotations[1] <- paste(
+        ifelse(p_value_body < 0.001, "***", 
+               ifelse(p_value_body < 0.01, "**", 
+                      ifelse(p_value_body < 0.05, "*", "ns"))), 
+        paste0("(", p_value_text_body, ")")
+      )
+    }
+  }
+
+  if (nrow(data_head) > 0) {
+    t_result_head <- tryCatch(
+      t.test(value ~ group, data = data_head),
+      error = function(e) {
+        message(paste("Skipping head comparison for", metabolite, "due to error in t-test:", e$message))
+        return(NULL)
+      }
+    )
+    if (!is.null(t_result_head)) {
+      p_value_head <- t_result_head$p.value
+      p_value_text_head <- format.pval(p_value_head, scientific = TRUE, digits = 3)
+      significance_annotations[2] <- paste(
+        ifelse(p_value_head < 0.001, "***", 
+               ifelse(p_value_head < 0.01, "**", 
+                      ifelse(p_value_head < 0.05, "*", "ns"))), 
+        paste0("(", p_value_text_head, ")")
+      )
+    }
+  }
+
+  # Get the custom label for the metabolite
+  custom_label <- custom_labels[metabolite]
+
+  # Create combined boxplot
+  bxp_combined <- ggboxplot(
+    combined_data, x = "group", y = "value", 
+    ylab = "Value", xlab = "Group", add = "jitter",
+    fill = "group"
+  ) +
+    scale_fill_manual(values = c("aass_HOMO_body" = "#90caf9", "aass_WT_body" = "#c8b1e4", "aass_HOMO_head" = "#1565c0", "aass_WT_head" = "#5a189a")) +
+    theme(
+       legend.position = "none", 
+       axis.text.y = element_text(size = 12),  # Decrease Y-axis text size
+       axis.text.x = element_text(size = 10),
+       axis.title.y = element_text(size = 15),
+       plot.title = element_text(size = 16, face = "bold")) +
+    ggtitle(paste(custom_label, "- body and head")) +
+    xlab("") +
+    ylab("Normalized intensity")
+  
+  bxp_combined <- bxp_combined + 
+    geom_signif(
+      comparisons = list(c("aass_WT_body", "aass_HOMO_body"), c("aass_WT_head", "aass_HOMO_head")),
+      map_signif_level = TRUE, textsize = 4,
+      annotations = significance_annotations
+    )
+
+  print(bxp_combined)
+  ggsave(paste(".//FiguresCombined//", metabolite, "body_head.png"), plot = bxp_combined, width = 7, height = 7)
+}
+
+# Example: Combine plots for Lys_2Fmoc
+combine_plots("Lys-2Fmoc", filtered_data_body, filtered_data_head, custom_labels)
+
+# To combine plots for all metabolites
+allmet_combined <- unique(c(unique(filtered_data_body$Compound.Name), unique(filtered_data_head$Compound.Name)))
+for (metabolite in allmet_combined) {
+  combine_plots(metabolite, filtered_data_body, filtered_data_head, custom_labels)
+}
+
+```
+
+
+c) Third comparison
+aldh7a1 gene WT vs HOMO body 
+
+
+```{r}
+
+# Filter rows where the group column is either 'aldh7a1_HOMO_body' or 'aldh7a1_WT_body'
+filtered_data_abody <- long_data %>% 
+  filter(group %in% c('aldh7a1_HOMO_body', 'aldh7a1_WT_body'))
+
+# Print the filtered data
+print(filtered_data_abody)
+
+allmet <- unique(filtered_data_abody$Compound.Name)
+allgroups <- unique(filtered_data_abody$group)
+
+for (i in allmet) {
+  aldh7a1_body <- filtered_data_abody %>% 
+    filter(Compound.Name %in% i)
+
+  # Reorder factor levels to have WT first
+  aldh7a1_body$group <- factor(aldh7a1_body$group, levels = c('aldh7a1_WT_body', 'aldh7a1_HOMO_body'))
+
+  if (sd_homo == 0 & sd_wt == 0) {
+    message(paste("Skipping", i, "due to essentially constant data in both groups"))
+    next
+  }
+  
+  t_result <- tryCatch(
+    t.test(value ~ group, data = aldh7a1_body, var.equal = FALSE),
+    error = function(e) {
+      message(paste("Skipping", i, "due to error in t-test:", e$message))
+      return(NULL)
+    }
+  )
+
+  if (is.null(t_result)) next
+
+  p_value <- t_result$p.value
+  p_value_text <- format(p_value, scientific = TRUE, digits = 3)  # Format p-value in scientific notation
+
+  # Combine numeric p-value with asterisks
+  significance_annotation_albody <- paste(
+    ifelse(p_value < 0.001, "***", 
+           ifelse(p_value < 0.01, "**", 
+                  ifelse(p_value < 0.05, "*", "ns"))), 
+    paste0("(", p_value_text, ")")
+  )
+
+  bxp <- ggboxplot(
+    aldh7a1_body, x = "group", y = "value", 
+    ylab = "Value", xlab = "Group", add = "jitter",
+    fill = "group"  # Added fill to distinguish groups by color
+  ) +
+  scale_fill_manual(values = c("aldh7a1_HOMO_body" = "#7aff31", "aldh7a1_WT_body" = "#fcc3f3")) +
+  theme(legend.position = "none") + # Remove legend
+  ggtitle(paste(i, "- body")) +
+  xlab("") +
+  ylab("Normalized intensity")
+
+  bxp <- bxp + 
+    geom_signif(
+      comparisons = list(c("aldh7a1_HOMO_body", "aldh7a1_WT_body")),
+      map_signif_level = FALSE, textsize = 4,
+      annotations = significance_annotation_albody
+    )
+
+  print(bxp)
+  ggsave(paste(".//Figures3//", i, "aldh7a1 body.png"), plot = bxp, width = 7, height = 7)
+}
+
+```
+
+###To plot all the significant ones together (aldh7a1_body)
+
+
+```{r}
+# Filter rows where the group column is either 'aldh7a1_HOMO_body' or 'aldh7a1_WT_body'
+filtered_data <- long_data %>% 
+  filter(group %in% c('aldh7a1_HOMO_body', 'aldh7a1_WT_body'))
+
+# Create a simplified group column
+filtered_data <- filtered_data %>%
+  mutate(simple_group = ifelse(group == 'aldh7a1_HOMO_body', 'HOMO', 'WT'),
+         group = factor(group, levels = c('aldh7a1_WT_body', 'aldh7a1_HOMO_body')))
+
+# Define the list of metabolites for the first and second figures
+metabolites_figure1 <- c("AAA-Fmoc", "PIP_Fmoc", "P6C_Fmoc 1", "P6C_Fmoc 2", "Saccharopine_Fmoc", "4-aminobutyrate_Fmoc")
+metabolites_figure2 <- setdiff(unique(filtered_data$Compound.Name), metabolites_figure1)
+
+# Create a named vector for custom labels
+custom_labels <- c(
+  "Ala_Fmoc" = "Alanine", "Asn_1Fmoc" = "Asparagine", "Asp_Fmoc" = "Aspartic acid", "Arg_1Fmoc" = "Arginine", "His_Fmoc" = "Histidine", "Gly_Fmoc" = "Glycine",
+  "Cys_Fmoc" = "Cysteine", "Glu_Fmoc" = "Glutamic acid", "Phe_Fmoc" = "Phenylalanine", 
+  "Pro_Fmoc" = "Proline", "Ser_Fmoc" = "Serine", "Thr_Fmoc" = "Threonine", 
+  "Trp_1Fmoc" = "Tryptophan", "Tyr_Fmoc" = "Tyrosine", "4-aminobutyrate_Fmoc" = "4-aminobutyrate*", 
+  "AAA-Fmoc" = "AAA", "PIP_Fmoc" = "PIP", "P6C_Fmoc 1" = "P6C*", "P6C_Fmoc 2" = "P6C*", 
+  "Saccharopine_Fmoc" = "Saccharopine"
+)
+
+# Function to generate plots
+generate_plot <- function(data, title, filename) {
+  significant_data <- data.frame()
+  
+  allmet <- unique(data$Compound.Name)
+  
+  for (i in allmet) {
+    aldh7a1_body <- data %>% 
+      filter(Compound.Name == i)
+  
+    # Reorder factor levels to have WT first
+    aldh7a1_body$simple_group <- factor(aldh7a1_body$simple_group, levels = c('WT', 'HOMO'))
+  
+    # Check if the standard deviation is zero for both groups
+    sd_homo <- sd(aldh7a1_body$value[aldh7a1_body$simple_group == 'HOMO'])
+    sd_wt <- sd(aldh7a1_body$value[aldh7a1_body$simple_group == 'WT'])
+  
+    if (sd_homo == 0 & sd_wt == 0) {
+      message(paste("Skipping", i, "due to essentially constant data in both groups"))
+      next
+    }
+  
+    t_result <- tryCatch(
+      t.test(value ~ simple_group, data = aldh7a1_body,, var.equal = FALSE),
+      error = function(e) {
+        message(paste("Skipping", i, "due to error in t-test:", e$message))
+        return(NULL)
+      }
+    )
+  
+    if (is.null(t_result)) next
+    
+    p_value <- t_result$p.value
+    
+    if (p_value < 0.05) {  # Consider significant if p-value < 0.05
+      aldh7a1_body$p_value <- p_value
+      significant_data <- rbind(significant_data, aldh7a1_body)
+    }
+  }
+  
+  # Check if there are any significant metabolites to plot
+  if (nrow(significant_data) > 0) {
+    significant_data <- significant_data %>%
+      mutate(significance_annotation = ifelse(p_value < 0.001, "***", 
+                                               ifelse(p_value < 0.01, "**", 
+                                                      ifelse(p_value < 0.05, "*", "ns"))),
+             p_value_text = paste(significance_annotation, "(", format.pval(p_value, scientific = TRUE, digits = 3), ")", sep = ""))  # Add p-value text with asterisks
+  
+    # Create a position dataframe for the annotations
+    annotation_positions <- significant_data %>%
+      group_by(Compound.Name) %>%
+      summarize(
+        max_value = max(value),
+        p_value_text = first(p_value_text)
+      )
+  
+    # Specific handling for 4-aminobutyrate and aspartic acid
+    annotation_positions <- annotation_positions %>%
+      mutate(max_value = case_when(
+        Compound.Name == "4-aminobutyrate_Fmoc" ~ max_value + 0.5,
+        Compound.Name == "Asp_Fmoc" ~ max_value * 3.0,
+        TRUE ~ max_value * 1.1
+      ))
+  
+    # Generate plot
+    bxp <- ggplot(significant_data, aes(x = simple_group, y = value, fill = group)) +
+      geom_boxplot(outlier.colour = NA) +
+      geom_jitter(width = 0.1) +
+      facet_wrap(~ Compound.Name, scales = "free_y", labeller = as_labeller(custom_labels)) +  # Revert ncol to original setting
+      scale_fill_manual(values = c("aldh7a1_HOMO_body" = "#7aff31", "aldh7a1_WT_body" = "#fcc3f3"),
+                        labels = c("aldh7a1_WT_body" = expression(italic("aldh7a1")~"WT Body"),
+                                   "aldh7a1_HOMO_body" = expression(italic("aldh7a1")~"HOMO Body"))) +
+       theme(  text = element_text(size = 25),  #Increase general text size
+            strip.text = element_text(size = 25, margin = margin(b=15)),  #Increase facet label size
+            strip.background = element_blank(),  #Remove the gray background from facet labels
+            axis.text.y = element_text(size = 15),  #Y-axis text size
+            axis.text.x = element_text(size = 15), #X-axis text size
+            axis.title.y = element_text(size = 24), #Y-axis title size
+            plot.title = element_text(size =28, margin = margin(b=15)), #Space below the title 
+            legend.position = "bottom",  #Position legend at the bottom
+            legend.title = element_blank(), #Remove legend title
+            legend.text = element_text(size = 25),
+            panel.background = element_blank(), #Remove grey background
+            panel.grid.major = element_blank(), #Remove major grid lines
+            panel.grid.minor = element_blank(), #Remove minor grid lines
+            axis.line = element_line(color = "black"),
+            plot.margin = margin(t =20, r = 20, b = 20, l = 20),  # Adjust margins around the plot
+            panel.spacing = unit(1, "lines")) +  # Increase spacing between box plots
+      labs(title = title, x = "", y = "Normalized intensity") +
+      geom_text(data = annotation_positions, aes(x = 1.5, y = max_value, label = p_value_text), inherit.aes = FALSE, vjust = 0.5, size = 6)  # Adjusted position and size for p-value text
+
+    print(bxp)
+    ggsave(filename, plot = bxp, width = 16, height = 12)  # Increase plot size
+  } else {
+    message("No significant metabolites found.")
+  }
+}
+
+# Generate plots for the two sets of metabolites
+generate_plot(filtered_data %>% filter(Compound.Name %in% metabolites_figure1), 
+              "Significant metabolites - body", 
+              ".//Figures3//significant_metabolites_figure1.png")
+
+generate_plot(filtered_data %>% filter(Compound.Name %in% metabolites_figure2), 
+              "Significant amino acids - body", 
+              ".//Figures3//significant_metabolites_figure2.png")
+```
+
+
+d) 4rd comparison
+aldh7a1 gene WT vs HOMO head
+
+
+```{r}
+
+# Filter rows where the group column is either 'aldh7a1_HOMO_head' or 'aldh7a1_WT_head'
+filtered_data_ahead <- long_data %>% 
+  filter(group %in% c('aldh7a1_HOMO_head', 'aldh7a1_WT_head'))
+
+# Print the filtered data
+print(filtered_data_ahead)
+
+allmet <- unique(filtered_data_ahead$Compound.Name)
+allgroups <- unique(filtered_data_ahead$group)
+
+for (i in allmet) {
+  aldh7a1_head <- filtered_data_ahead %>% 
+    filter(Compound.Name %in% i)
+
+  # Reorder factor levels to have WT first
+  aldh7a1_head$group <- factor(aldh7a1_head$group, levels = c('aldh7a1_WT_head', 'aldh7a1_HOMO_head'))
+  
+  if (sd_homo == 0 & sd_wt == 0) {
+    message(paste("Skipping", i, "due to essentially constant data in both groups"))
+    next
+  }
+  
+  
+ t_result <- tryCatch(
+    t.test(value ~ group, data = aldh7a1_head, var.equal = FALSE),
+    error = function(e) {
+      message(paste("Skipping", i, "due to error in t-test:", e$message))
+      return(NULL)
+    }
+  )
+
+  if (is.null(t_result)) next
+
+  p_value <- t_result$p.value
+  p_value_text <- format(p_value, scientific = TRUE, digits = 3)  # Format p-value in scientific notation
+
+  # Combine numeric p-value with asterisks
+  significance_annotation_alhead <- paste(
+    ifelse(p_value < 0.001, "***", 
+           ifelse(p_value < 0.01, "**", 
+                  ifelse(p_value < 0.05, "*", "ns"))), 
+    paste0("(", p_value_text, ")")
+  )
+
+  bxp <- ggboxplot(
+    aldh7a1_head, x = "group", y = "value", 
+    ylab = "Value", xlab = "Group", add = "jitter",
+    fill = "group"  # Added fill to distinguish groups by color
+  ) +
+  scale_fill_manual(values = c("aldh7a1_HOMO_head" = "#168326", "aldh7a1_WT_head" = "#b00682")) +
+  theme(legend.position = "none") + # Remove legend
+  ggtitle(paste(i, "- head")) +
+  xlab("") +
+  ylab("Normalized intensity")
+
+  bxp <- bxp + 
+    geom_signif(
+      comparisons = list(c("aldh7a1_HOMO_head", "aldh7a1_WT_head")),
+      map_signif_level = FALSE, textsize = 4,
+      annotations = significance_annotation_alhead
+    )
+
+  print(bxp)
+  ggsave(paste(".//Figures4//", i, "aldh7a1 head.png"), plot = bxp, width = 7, height = 7)
+}
+
+```
+
+###To plot all the significant ones together (aldh7a1_head)
+
+
+```{r}
+
+# Filter rows where the group column is either 'aldh7a1_HOMO_head' or 'aldh7a1_WT_head'
+filtered_data <- long_data %>% 
+  filter(group %in% c('aldh7a1_HOMO_head', 'aldh7a1_WT_head'))
+
+# Create a simplified group column
+filtered_data <- filtered_data %>%
+  mutate(simple_group = ifelse(group == 'aldh7a1_HOMO_head', 'HOMO', 'WT'),
+         group = factor(group, levels = c('aldh7a1_WT_head', 'aldh7a1_HOMO_head')))
+
+# Define the list of metabolites for the first and second figures
+metabolites_figure1 <- c("AAA-Fmoc", "PIP_Fmoc", "P6C_Fmoc 1", "P6C_Fmoc 2", "Saccharopine_Fmoc", "4-aminobutyrate_Fmoc")
+metabolites_figure2 <- setdiff(unique(filtered_data$Compound.Name), metabolites_figure1)
+
+# Create a named vector for custom labels
+custom_labels <- c(
+  "Ala_Fmoc" = "Alanine", "Asn_1Fmoc" = "Asparagine", "Asp_Fmoc" = "Aspartic acid", "Arg_1Fmoc" = "Arginine",
+  "Cys_Fmoc" = "Cysteine", "Glu_Fmoc" = "Glutamic acid", "Phe_Fmoc" = "Phenylalanine", 
+  "Pro_Fmoc" = "Proline", "Ser_Fmoc" = "Serine", "Thr_Fmoc" = "Threonine", 
+  "Trp_1Fmoc" = "Tryptophan", "Tyr_Fmoc" = "Tyrosine", "4-aminobutyrate_Fmoc" = "4-aminobutyrate*", 
+  "AAA-Fmoc" = "AAA", "PIP_Fmoc" = "PIP", "P6C_Fmoc 1" = "P6C*", "P6C_Fmoc 2" = "P6C*", 
+  "Saccharopine_Fmoc" = "Saccharopine"
+)
+
+# Function to generate plots
+generate_plot <- function(data, title, filename) {
+  significant_data <- data.frame()
+  
+  allmet <- unique(data$Compound.Name)
+  
+  for (i in allmet) {
+    aldh7a1_head <- data %>% 
+      filter(Compound.Name == i)
+  
+    # Reorder factor levels to have WT first
+    aldh7a1_head$simple_group <- factor(aldh7a1_head$simple_group, levels = c('WT', 'HOMO'))
+  
+    # Check if the standard deviation is zero for both groups
+    sd_homo <- sd(aldh7a1_head$value[aldh7a1_head$simple_group == 'HOMO'])
+    sd_wt <- sd(aldh7a1_head$value[aldh7a1_head$simple_group == 'WT'])
+  
+    if (sd_homo == 0 & sd_wt == 0) {
+      message(paste("Skipping", i, "due to essentially constant data in both groups"))
+      next
+    }
+  
+    t_result <- tryCatch(
+      t.test(value ~ simple_group, data = aldh7a1_head, var.equal = FALSE),
+      error = function(e) {
+        message(paste("Skipping", i, "due to error in t-test:", e$message))
+        return(NULL)
+      }
+    )
+  
+    if (is.null(t_result)) next
+    
+    p_value <- t_result$p.value
+    
+    if (p_value < 0.05) {  # Consider significant if p-value < 0.05
+      aldh7a1_head$p_value <- p_value
+      significant_data <- rbind(significant_data, aldh7a1_head)
+    }
+  }
+  
+  # Check if there are any significant metabolites to plot
+  if (nrow(significant_data) > 0) {
+    significant_data <- significant_data %>%
+      mutate(significance_annotation = ifelse(p_value < 0.001, "***", 
+                                               ifelse(p_value < 0.01, "**", 
+                                                      ifelse(p_value < 0.05, "*", "ns"))),
+             p_value_text = paste(significance_annotation, "(", format.pval(p_value, scientific = TRUE, digits = 3), ")", sep = ""))  # Add p-value text with asterisks
+  
+    # Create a position dataframe for the annotations
+    annotation_positions <- significant_data %>%
+      group_by(Compound.Name) %>%
+      summarize(
+        max_value = max(value),
+        p_value_text = first(p_value_text)
+      )
+  
+    # Generate plot
+    bxp <- ggplot(significant_data, aes(x = simple_group, y = value, fill = group)) +
+      geom_boxplot(outlier.colour = NA) +
+      geom_jitter(width = 0.1) +
+      facet_wrap(~ Compound.Name, scales = "free_y", labeller = as_labeller(custom_labels)) +  # Adjust ncol to 1 to make individual graphs bigger
+      scale_fill_manual(values = c("aldh7a1_HOMO_head" = "#168326", "aldh7a1_WT_head" = "#b00682"),
+                        labels = c("aldh7a1_WT_head" = expression(italic("aldh7a1")~"WT Head"),
+                                   "aldh7a1_HOMO_head" = expression(italic("aldh7a1")~"HOMO Head"))) +
+       theme(  text = element_text(size = 25),  #Increase general text size
+            strip.text = element_text(size = 25, margin = margin(b=15)),  #Increase facet label size
+            strip.background = element_blank(),  #Remove the gray background from facet labels
+            axis.text.y = element_text(size = 15),  #Y-axis text size
+            axis.text.x = element_text(size = 15), #X-axis text size
+            axis.title.y = element_text(size = 24), #Y-axis title size
+            plot.title = element_text(size =28, margin = margin(b=15)), #Space below the title 
+            legend.position = "bottom",  #Position legend at the bottom
+            legend.title = element_blank(), #Remove legend title
+            legend.text = element_text(size = 25),
+            panel.background = element_blank(), #Remove grey background
+            panel.grid.major = element_blank(), #Remove major grid lines
+            panel.grid.minor = element_blank(), #Remove minor grid lines
+            axis.line = element_line(color = "black"),
+            plot.margin = margin(t =20, r = 20, b = 20, l = 20),  # Adjust margins around the plot
+            panel.spacing = unit(1, "lines")) +  # Increase spacing between box plots
+      labs(title = title, x = "", y = "Normalized intensity") +
+      geom_text(data = annotation_positions, aes(x = 1.5, y = max_value * 1.1, label = p_value_text), inherit.aes = FALSE, vjust = 0.5, size = 6)  # Adjusted position and size for p-value text
+
+    print(bxp)
+    ggsave(filename, plot = bxp, width = 16, height = 12)  # Increase plot size
+  } else {
+    message("No significant metabolites found.")
+  }
+}
+
+# Generate plots for the two sets of metabolites
+generate_plot(filtered_data %>% filter(Compound.Name %in% metabolites_figure1), 
+              "Significant metabolites - head", 
+              ".//Figures4//significant_metabolites_figure1.png")
+
+generate_plot(filtered_data %>% filter(Compound.Name %in% metabolites_figure2), 
+              "Significant amino acids - head", 
+              ".//Figures4//significant_metabolites_figure2.png")
+
+
+```
+
+######Combine body and head for each metabolite (aldh7a1 gene)
+
+
+```{r}
+
+library(dplyr)
+library(ggplot2)
+library(ggpubr)
+
+# Custom labels for metabolites
+custom_labels <- c(
+  "Ala_Fmoc" = "Alanine", "Asn_1Fmoc" = "Asparagine", "Asp_Fmoc" = "Aspartic acid", 
+  "Arg_1Fmoc" = "Arginine", "His_Fmoc" = "Histidine", "Gly_Fmoc" = "Glycine",
+  "Cys_Fmoc" = "Cysteine", "Glu_Fmoc" = "Glutamic acid", "Phe_Fmoc" = "Phenylalanine", 
+  "Pro_Fmoc" = "Proline", "Ser_Fmoc" = "Serine", "Thr_Fmoc" = "Threonine", 
+  "Trp_1Fmoc" = "Tryptophan", "Tyr_Fmoc" = "Tyrosine", "4-aminobutyrate_Fmoc" = "4-aminobutyrate*", 
+  "AAA-Fmoc" = "AAA", "PIP_Fmoc" = "PIP", "P6C_Fmoc 1" = "P6C*", "P6C_Fmoc 2" = "P6C*", 
+  "Saccharopine_Fmoc" = "Saccharopine", "Lys-2Fmoc" = "Lysine", "Gln_Fmoc" = "Glutamine",
+  "5-Aminopentanoate_Fmoc" = "5-aminopentanoate", "Ile_Fmoc" = "Isoleucine", "Leu_Fmoc" ="Leucine", "Val_Fmoc" = "Valine"
+)
+
+# Function to create combined plot for each metabolite
+create_combined_plot <- function(metabolite, filtered_data_abody, filtered_data_ahead, custom_labels) {
+  data_body <- filtered_data_abody %>% filter(Compound.Name == metabolite)
+  data_head <- filtered_data_ahead %>% filter(Compound.Name == metabolite)
+
+  combined_data <- bind_rows(
+    data_body %>% mutate(region = "body"),
+    data_head %>% mutate(region = "head")
+  )
+
+  combined_data$group <- factor(combined_data$group, levels = c('aldh7a1_WT_body', 'aldh7a1_HOMO_body', 'aldh7a1_WT_head', 'aldh7a1_HOMO_head'))
+
+  # Perform t-tests for body and head separately
+  significance_annotations <- c("ns", "ns")
+  valid_comparisons <- list()
+
+  if (nrow(data_body) > 0 && length(unique(data_body$group)) == 2) {
+    t_result_body <- tryCatch(
+      t.test(value ~ group, data = data_body),
+      error = function(e) {
+        message(paste("Skipping body comparison for", metabolite, "due to error in t-test:", e$message))
+        return(NULL)
+      }
+    )
+    if (!is.null(t_result_body)) {
+      p_value_body <- t_result_body$p.value
+      p_value_text_body <- format.pval(p_value_body, scientific = TRUE, digits = 3)
+      significance_annotations[1] <- paste(
+        ifelse(p_value_body < 0.001, "***", 
+               ifelse(p_value_body < 0.01, "**", 
+                      ifelse(p_value_body < 0.05, "*", "ns"))), 
+        paste0("(", p_value_text_body, ")")
+      )
+      valid_comparisons[[1]] <- c("aldh7a1_WT_body", "aldh7a1_HOMO_body")
+    }
+  }
+
+  if (nrow(data_head) > 0 && length(unique(data_head$group)) == 2) {
+    t_result_head <- tryCatch(
+      t.test(value ~ group, data = data_head, var.equal = FALSE),
+      error = function(e) {
+        message(paste("Skipping head comparison for", metabolite, "due to error in t-test:", e$message))
+        return(NULL)
+      }
+    )
+    if (!is.null(t_result_head)) {
+      p_value_head <- t_result_head$p.value
+      p_value_text_head <- format.pval(p_value_head, scientific = TRUE, digits = 3)
+      significance_annotations[2] <- paste(
+        ifelse(p_value_head < 0.001, "***", 
+               ifelse(p_value_head < 0.01, "**", 
+                      ifelse(p_value_head < 0.05, "*", "ns"))), 
+        paste0("(", p_value_text_head, ")")
+      )
+      valid_comparisons[[2]] <- c("aldh7a1_WT_head", "aldh7a1_HOMO_head")
+    }
+  }
+
+  # Get the custom label for the metabolite
+  custom_label <- ifelse(!is.null(custom_labels[metabolite]), custom_labels[metabolite], metabolite)
+
+  # Create combined boxplot
+  bxp_combined <- ggboxplot(
+    combined_data, x = "group", y = "value", 
+    ylab = "Value", xlab = "Group", add = "jitter",
+    fill = "group"
+  ) +
+    scale_fill_manual(values = c("aldh7a1_HOMO_body" = "#7aff31", "aldh7a1_WT_body" = "#fcc3f3", "aldh7a1_HOMO_head" = "#168326", "aldh7a1_WT_head" = "#b00682")) +
+    theme(
+      legend.position = "none", 
+      axis.text.y = element_text(size = 12),  # Decrease Y-axis text size
+      axis.text.x = element_text(size = 10),
+      axis.title.y = element_text(size = 15),
+      plot.title = element_text(size = 16, face = "bold")) +
+    ggtitle(paste(custom_label, "- body and head")) +
+    xlab("") +
+    ylab("Normalized intensity")
+  
+  # Only add significance if there are valid comparisons
+  if (length(valid_comparisons) > 0) {
+    bxp_combined <- bxp_combined + 
+      geom_signif(
+        comparisons = valid_comparisons,
+        map_signif_level = TRUE, textsize = 4,
+        annotations = significance_annotations[1:length(valid_comparisons)]
+      )
+  }
+
+  print(bxp_combined)
+  ggsave(paste(".//FiguresCombined2//", metabolite, "body_head.png"), plot = bxp_combined, width = 7, height = 7)
+}
+
+# Filter body and head data
+filtered_data_body <- long_data %>% filter(group %in% c('aldh7a1_HOMO_body', 'aldh7a1_WT_body'))
+filtered_data_head <- long_data %>% filter(group %in% c('aldh7a1_HOMO_head', 'aldh7a1_WT_head'))
+
+# Get all unique metabolites
+allmet_combined <- unique(c(unique(filtered_data_abody$Compound.Name), unique(filtered_data_ahead$Compound.Name)))
+
+# Create combined plots for all metabolites
+for (metabolite in allmet_combined) {
+  create_combined_plot(metabolite, filtered_data_abody, filtered_data_ahead, custom_labels)
+}
+
+```
+
+
+
+
